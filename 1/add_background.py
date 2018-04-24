@@ -1,14 +1,15 @@
 import argparse
 import random
-import textwrap
 import os
+import textwrap
+
 import numpy as np
 import librosa as lr
 
 
 def add_bck(file_in, noise, snr=14):
-    sound, sr_sound = lr.core.load(file_in)
-    noise, sr_noise = lr.core.load(noise)
+    sound, sr_sound = lr.core.load(file_in, sr=16000)
+    noise, sr_noise = lr.core.load(noise, sr=16000)
     while noise.shape[0] < sound.shape[0]:  # loop in case noise is shorter than
         noise = np.concatenate((noise, noise), axis=0)
     noise = noise[0:sound.shape[0]]
@@ -20,15 +21,18 @@ def add_bck(file_in, noise, snr=14):
     y = sound + noise * snr_linear_factor
     rms_y = np.sqrt(np.mean(np.power(y, 2)))
     y = y * rms_sound / rms_y
+
     return y, sr_sound
 
 
-def add_noise(in_path, out_path, noise_path):
+def add_noise(in_path, out_path, noise_path, cnt=None):
     in_files_names = list(filter(lambda file_name: file_name[-4:] == '.wav' or file_name[-5:] == '.flac', os.listdir(in_path)))
     if not os.path.exists(out_path):
         os.makedirs(out_path)
     noise_files_names = list(filter(lambda file_name: file_name[-4:] == '.wav' or file_name[-5:] == '.flac', os.listdir(noise_path)))
-    for file_name in in_files_names:
+    if cnt is None:
+        cnt = len(in_files_names)
+    for file_name in in_files_names[:cnt]:
         abs_file_in_path = os.path.join(in_path, file_name)
         noise_file_name = random.choice(noise_files_names)
         abs_file_noise_path = os.path.join(noise_path, noise_file_name)

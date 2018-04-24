@@ -13,60 +13,47 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.svm import LinearSVC
 
-
-def test_models(models_with_names, X, y, predict_fun, n_splits=5):
-    for clf, name in models_with_names:
-        print('{0: <20}'.format(name), end='')
-        aucs = []
-        skf = StratifiedKFold(n_splits=n_splits, random_state=42)
-        for train_index, test_index in skf.split(X, y):
-            X_train, X_test, y_train, y_test = X[train_index], X[test_index], y[train_index], y[test_index]
-            clf.fit(X_train, y_train)
-            y_pred = predict_fun(clf, X_test)
-            auc = metrics.roc_auc_score(y_test, y_pred)
-            aucs.append(auc)
-        auc = np.mean(aucs)
-        print("AUC:", auc)
+from keras.layers import Input, Embedding, LSTM, Dense, concatenate
+from keras.models import Model
+from sklearn.model_selection import train_test_split
 
 
-def test_all_sklearn(X, y):
-    scaler = MinMaxScaler()
-    print("\nCurrent scaler", scaler, end="\n\n")
-    X_scaled = scaler.fit_transform(X)
-    models_with_names = ((MultinomialNB(), "MultinomialNB"),
-                         (BernoulliNB(), "BernoulliNB"))
+def rnn(X_data, mfcc_data, y):
+    train_index, test_index = train_test_split(list(range(X_data.shape[0])))
 
-    test_models(models_with_names, X_scaled, y, lambda clf, x: clf.predict_proba(x)[:, 1])
+    main_input = Input(shape=(X_data.shape[1], 1), dtype='float', name='main_input')
+    lstm_out = LSTM(32)(main_input)
+    auxiliary_output = Dense(1, activation='sigmoid', name='aux_output')(lstm_out)
+    auxiliary_input = Input(shape=(mfcc_data.shape[1],), name='aux_input')
+    x = concatenate([lstm_out, auxiliary_input])
 
-    for scaler in [MinMaxScaler(), StandardScaler()]:
-        print("\nCurrent scaler", scaler, end="\n\n")
+    # We stack a deep densely-connected network on top
+    x = Dense(64, activation='relu')(x)
+    x = Dense(64, activation='relu')(x)
+    x = Dense(64, activation='relu')(x)
 
-        X_scaled = scaler.fit_transform(X)
-        models_with_names = ((RidgeClassifier(), "Ridge Classifier"),
-                             (Perceptron(), "Perceptron"),
-                             (PassiveAggressiveClassifier(), "Passive-Aggressive"),
-                             (SGDClassifier(), "LinearSVC"),
-                             (SGDClassifier(), "SGDClassifier"),
-                             (LinearSVC(), "LinearSVC"))
-
-        test_models(models_with_names, X_scaled, y, lambda clf, x: clf.decision_function(x))
-
-        models_with_names = (
-            (xgb.XGBClassifier(), "XGBoost")
-            , (RandomForestClassifier(), "Random forest"))
-
-        test_models(models_with_names, X_scaled, y, lambda clf, x: clf.predict_proba(x)[:, 1], n_splits=2)
-
+    # And finally we add the main logistic regression layer
+    main_output = Dense(1, activation='sigmoid', name='main_output')(x)
+    model = Model(inputs=[main_input, auxiliary_input], outputs=[main_output, auxiliary_output])
+    model.compile(optimizer='rmsprop', loss='binary_crossentropy',
+                  loss_weights=[1., 0.2])
+    model.fit([X_data.iloc[train_index], mfcc_data.iloc[train_index]], [y.iloc[train_index], y.iloc[train_index]],
+          epochs=50, batch_size=32)
 
 def main():
-    FEATURE_PATH = "../features/feaures_pyAA_all_10ms.csv"
-    nrows = 30000
-    feature_df = pd.read_csv(FEATURE_PATH, nrows=nrows)
-    nfeatures = feature_df.shape[1] - 2
-    only_features = feature_df.iloc[:, :nfeatures]
-    X = only_features.as_matrix()
-    y = feature_df.IS_LAUGHTER.as_matrix()
-    test_all_sklearn(X, y)
+    DATA_FEATURE_PATH = "features_data.csv"
+    MFCC_PATH = "mfcc.csv"
+    nrows = 300
+    data_df = pd.read_csv(DATA_FEATURE_PATH, nrows=nrows)
+    mfcc_df = pd.read_csv(MFCC_PATH, nrows=nrows)
+    data_nfeatures = data_df.shape[1] - 2
+    mfcc_nfeatures = mfcc_df.shape[1] - 2
+    only_data_features = data_df.iloc[:, :data_nfeatures]
+    only_mfcc_features = mfcc_df.iloc[:, :mfcc_nfeatures]
+    # data_X = only_data_features.as_matrix()
+    # data_mfcc = only_mfcc_features.as_matrix()
+    y = data_df.IS_LAUGHTER
+    rnn(only_data_features, only_mfcc_features, y)
 
 if __name__ == '__main__':
     main()

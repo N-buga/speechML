@@ -31,7 +31,7 @@ def sample_wav_by_time(wav_path, frame_sec):
 
 
 def main():
-    wav_path = "/home/kurbanov/Data/vocalizationcorpus/data/S0458.wav"
+    wav_path = "vocalizationcorpus/data/S0001.wav"
     df = sample_wav_by_time(wav_path, frame_sec=0.01)
     print(df.shape)
     print(df.head())

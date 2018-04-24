@@ -1,33 +1,39 @@
-import os
-import tempfile
-
+import scipy.io.wavfile as wav
+import librosa
 import pandas as pd
-import laughter_classification.psf_features as psf_features
+import numpy as np
 
 
 class FeatureExtractor:
-    def extract_features(self, wav_path):
+
+    def extract_features(self, wav_path, frame_sec=0.01):
         """
         Extracts features for classification ny frames for .wav file
 
         :param wav_path: string, path to .wav file
         :return: pandas.DataFrame with features of shape (n_chunks, n_features)
         """
-        raise NotImplementedError("Should have implemented this")
 
+        rate, audio = wav.read(wav_path)
 
-class PyAAExtractor(FeatureExtractor):
-    """Python Audio Analysis features extractor"""
-    def __init__(self):
-        self.extract_script = "./extract_pyAA_features.py"
-        self.py_env_name = "ipykernel_py2"
+        # Let's make and display a mel-scaled power (energy-squared) spectrogram
+        frame_size = int(rate * frame_sec)
 
-    def extract_features(self, wav_path):
-        with tempfile.NamedTemporaryFile() as tmp_file:
-            feature_save_path = tmp_file.name
-            cmd = "python \"{}\" --wav_path=\"{}\" " \
-                  "--feature_save_path=\"{}\"".format(self.extract_script, wav_path, feature_save_path)
-            os.system("source activate {}; {}".format(self.py_env_name, cmd))
+        filterbanks = []
+        mfccs = []
 
-            feature_df = pd.read_csv(feature_save_path)
-        return feature_df
+        for i in range(0, len(audio) - frame_size, frame_size):
+            # Convert to log scale (dB). We'll use the peak power (max) as reference.
+            cur_filterbank = librosa.feature.melspectrogram(y=audio.astype(np.float)[i: i + frame_size], sr=rate)
+            filterbanks.append(np.mean(np.log(cur_filterbank), axis=1))
+            # Next, we'll extract the top 13 Mel-frequency cepstral coefficients (MFCCs)
+            cur_mfcc = librosa.feature.mfcc(y=audio.astype(np.float)[i: i + frame_size], sr=rate)
+            mfccs.append(np.mean(cur_mfcc, axis=1))
+
+        filterbank = np.vstack(filterbanks)
+        mfcc = np.vstack(mfccs)
+
+        columns_mfcc = list(map(lambda num: 'mfcc_' + str(num), list(range(mfcc.shape[1]))))
+        columns_filter = list(map(lambda num: 'filterbank_' + str(num), list(range(filterbank.shape[1]))))
+        return pd.DataFrame(mfcc, columns=columns_mfcc), columns_mfcc, \
+               pd.DataFrame(filterbank, columns=columns_filter), columns_filter

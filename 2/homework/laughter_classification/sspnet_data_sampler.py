@@ -1,13 +1,15 @@
 import os
 from os.path import join
+from random import shuffle
 
 import numpy as np
 import pandas as pd
 import scipy.io.wavfile as wav
 
-from laughter_classification.utils import chunks, in_any, interv_to_range, get_sname
+from homework.laughter_classification.utils import chunks, in_any, interv_to_range, get_sname
+from homework.laughter_prediction.feature_extractors import FeatureExtractor
 
-from laughter_prediction.sample_audio import sample_wav_by_time
+from homework.laughter_prediction.sample_audio import sample_wav_by_time
 
 
 class SSPNetDataSampler:
@@ -23,12 +25,11 @@ class SSPNetDataSampler:
         labels = pd.read_csv(labels_path, names=def_cols, engine='python', skiprows=1)
         return labels
 
-    def __init__(self, corpus_root):
+    def __init__(self, data_dir, labels_path):
         self.sample_rate = 16000
         self.duration = 11
         self.default_len = self.sample_rate * self.duration
-        self.data_dir = join(corpus_root, "data")
-        labels_path = join(corpus_root, "labels.txt")
+        self.data_dir = data_dir
         self.labels = self.read_labels(labels_path)
 
     @staticmethod
@@ -71,15 +72,16 @@ class SSPNetDataSampler:
         """
         data = sample_wav_by_time(wav_path, frame_sec)
         labels = self.get_labels_for_file(wav_path, frame_sec)
-        df = pd.concat([data, labels], axis=1)
-        return df
+        mfcc_features, mfcc_columns, filter_features, filter_columns = FeatureExtractor().extract_features(wav_path, frame_sec)
+        df_data = pd.concat([data, filter_features, mfcc_features, labels], axis=1)
+        return df_data, data.shape[1], filter_columns, mfcc_columns
 
     def get_valid_wav_paths(self):
         for dirpath, dirnames, filenames in os.walk(self.data_dir):
             fullpaths = [join(dirpath, fn) for fn in filenames]
             return [path for path in fullpaths if len(wav.read(path)[1]) == self.default_len]
 
-    def create_sampled_df(self, frame_sec, naudio=None, save_path=None, force_save=False):
+    def create_sampled_df(self, frame_sec, naudio=None, save_data_path=None, save_mfcc_path=None, force_save=False):
         """
         Returns sampled data for whole corpus
         :param frame_sec: int, length of each frame in sec
@@ -89,17 +91,30 @@ class SSPNetDataSampler:
         :return:
         """
         fullpaths = self.get_valid_wav_paths()[:naudio]
-        dataframes = [self.df_from_file(wav_path, frame_sec) for wav_path in fullpaths]
-        df = pd.concat(dataframes)
+        datas = [self.df_from_file(wav_path, frame_sec) for wav_path in fullpaths]
+        dataframes = [data[0] for data in datas]
+        data_df = pd.concat(dataframes)
 
-        colnames = ["V{}".format(i) for i in range(df.shape[1] - 2)]
+        frames_name = ["V{}".format(i) for i in range(datas[0][1])]
+        colnames = frames_name + datas[0][2] + datas[0][3]
         colnames.append("IS_LAUGHTER")
         colnames.append("SNAME")
-        df.columns = colnames
+        data_df.columns = colnames
 
-        if save_path is not None:
-            if not os.path.isfile(save_path) or force_save:
-                print("saving df: ", save_path)
-                df.to_csv(save_path, index=False)
+        df = data_df.sample(frac=1)
 
-        return df
+        if save_data_path is not None:
+            if not os.path.isfile(save_data_path) or force_save:
+                print("saving data df: ", save_data_path)
+                df.loc[:, frames_name + datas[0][2] + ["IS_LAUGHTER"] + ["SNAME"]].to_csv(save_data_path, index=False)
+
+        if save_mfcc_path is not None:
+            if not os.path.isfile(save_mfcc_path) or force_save:
+                print("saving mfcc df: ", save_mfcc_path)
+                df.loc[:, datas[0][3] + ["IS_LAUGHTER"] + ["SNAME"]].to_csv(save_mfcc_path, index=False)
+
+        return df, frames_name + datas[0][2], datas[0][3], "IS_LAUGHTER", "SNAME"
+
+
+SSPNetDataSampler('vocalizationcorpus/train', 'vocalizationcorpus/train_labels.csv').create_sampled_df(0.01, 6,
+                    save_data_path='features_data.csv', save_mfcc_path="mfcc.csv", force_save=True)
